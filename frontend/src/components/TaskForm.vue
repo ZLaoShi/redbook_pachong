@@ -78,16 +78,12 @@ const handleCancel = () => {
       <n-input
         v-model:value="formData.user_cookie"
         type="textarea"
-        placeholder="请输入小红书登录后的Cookie"
+        placeholder="例如: acw_tc=0a00dc2617466931164414744e8b6db4b789376f7546d8fdd8314f4e8d64b8; webBuild=4.62.3; xsecappid=xhs-pc-web; a1=196af05d4ec30ksq77e5aznd3lo6966jwhw7nwzvb50000298328; webId=82baeb2ce69b30446e0447b30b26fc67; gid=yjK0i82dWiEJyjK0i82f4xEudSq8TMAWWd20EhDuIfq1lW28KjKKVI888JjYqJY8iy8880ff;"
         :autosize="{
           minRows: 3,
           maxRows: 5
         }"
       />
-      <div class="form-tip">
-        获取方法：在浏览器中登录小红书 → F12打开开发者工具 → 网络(Network)选项卡 → 
-        点击任意请求 → 右侧Headers中找到Cookie → 复制完整内容
-      </div>
     </n-form-item>
     
     <!-- 抓取规则 -->
@@ -105,6 +101,9 @@ const handleCancel = () => {
             ]"
             class="rule-select"
           />
+          <div class="form-tip api-limit-tip">
+            注意：小红书API默认只返回最近约30条笔记。如果筛选后数量太少，可以尝试选择"全部"类型。
+          </div>
         </div>
         
         <!-- 排序方式 -->
@@ -153,6 +152,16 @@ const handleCancel = () => {
   color: #888;
   margin-top: 4px;
   line-height: 1.5;
+}
+
+.api-limit-tip {
+  margin-top: 8px;
+  color: #ff9800;
+  font-weight: 500;
+  background-color: #fff8e1;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border-left: 3px solid #ff9800;
 }
 
 .rules-card {
