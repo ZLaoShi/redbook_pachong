@@ -12,15 +12,34 @@ from models import User, Task, Note
 from api.v1.api import api_router as api_v1_router
 from core.config import settings
 from worker.task_processor import run_background_tasks
+from fastapi.middleware.cors import CORSMiddleware
 
 # 在应用启动前创建数据库表 (仅用于开发)
 def create_db_and_tables():
     Base.metadata.create_all(bind=engine)
 
+# 设置允许的源
+origins = [
+    "http://localhost:5173",  # Vite 开发服务器默认端口
+    "http://localhost:8000",
+    "http://localhost",
+    "http://192.168.96.48",
+    "http://192.168.96.48:5173",
+]
+
 app = FastAPI(
     title="小红书笔记分析工具 API",
     version="0.1.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
+)
+
+# 添加 CORS 中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 用于运行后台任务的executor
