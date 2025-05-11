@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import Register from '../views/Register.vue'
 
 // 页面组件
 const Login = () => import('../views/Login.vue')
@@ -15,6 +16,11 @@ const routes = [
     name: 'Login',
     component: Login,
     meta: { requiresAuth: false }
+  },
+   { // 添加注册路由
+    path: '/register',
+    name: 'Register',
+    component: Register
   },
   {
     path: '/dashboard',
