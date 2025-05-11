@@ -12,6 +12,8 @@ from models.note import Note as NoteModel
 from services.aihubmax_service import get_xhs_note_detail, transcribe_audio, get_qwen_chat_completion, QwenMessage
 from utils.media_processor import process_video_to_audio, cleanup_media_files
 from core.config import settings
+# 从服务层导入增强版获取功能
+from services.enhanced_xhs_service import get_enhanced_note_detail
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -41,16 +43,22 @@ async def process_note_collection():
                     )
                     continue
                     
-                # 调用API获取笔记详情
-                note_url = HttpUrl(note.xhs_note_url)
-                # TODO: 替换为增强版的笔记详情获取函数
-                # response = await get_xhs_note_detail_enhanced(
-                #     note_id=note.xhs_note_id,
-                #     title=note.note_title,
-                #     cookie=task.user_cookie
-                # )
-                response = await get_xhs_note_detail(note_url, task.user_cookie)
+                # 使用增强版获取笔记详情
+                if note.note_title:
+                    logger.info(f"使用增强版API获取笔记 {note.id} ({note.xhs_note_id}) 的详情")
+                    response = await get_enhanced_note_detail(
+                        note_id=note.xhs_note_id,
+                        title=note.note_title,
+                        cookie=task.user_cookie,
+                        note_type=note.note_type
+                    )
+                else:
+                    # 如果没有标题，回退到原始方法
+                    logger.info(f"笔记 {note.id} 没有标题，使用原始API获取详情")
+                    note_url = HttpUrl(note.xhs_note_url)
+                    response = await get_xhs_note_detail(note_url, task.user_cookie)
                 
+                # 其余处理逻辑不变
                 if not response or response.code != 0 or not response.data:
                     error_msg = f"获取笔记详情失败: {response.msg if response else 'API请求失败'}"
                     logger.error(error_msg)
@@ -132,8 +140,23 @@ async def process_note_transcription():
                     )
                     continue
                 
-                # 下载视频并提取音频
-                video_path, audio_path = process_video_to_audio(video_url)
+                # 添加多次尝试下载视频的逻辑
+                max_download_attempts = 3
+                for download_attempt in range(max_download_attempts):
+                    try:
+                        video_path, audio_path = process_video_to_audio(video_url)
+                        if audio_path:
+                            break  # 下载成功，跳出循环
+                            
+                        logger.warning(f"下载视频或提取音频失败 (尝试 {download_attempt+1}/{max_download_attempts})")
+                        if download_attempt < max_download_attempts - 1:
+                            logger.info(f"将在10秒后重试下载")
+                            await asyncio.sleep(10)
+                    except Exception as e:
+                        logger.error(f"下载视频过程中发生异常: {e}")
+                        if download_attempt < max_download_attempts - 1:
+                            logger.info(f"将在10秒后重试下载")
+                            await asyncio.sleep(10)
                 
                 if not audio_path:
                     crud_note.update_note_with_error(
@@ -143,8 +166,28 @@ async def process_note_transcription():
                     )
                     continue
                 
-                # 调用Whisper API进行转录
-                transcription_response = await transcribe_audio(audio_path)
+                # 转录也使用多次尝试
+                max_transcribe_attempts = 3
+                for transcribe_attempt in range(max_transcribe_attempts):
+                    try:
+                        # 使用不同的转录模型
+                        models = ["whisper-1", "large", "medium"]  # 假设支持这些模型
+                        model_to_use = models[min(transcribe_attempt, len(models)-1)]
+                        
+                        logger.info(f"使用模型 {model_to_use} 尝试转录 (尝试 {transcribe_attempt+1}/{max_transcribe_attempts})")
+                        transcription_response = await transcribe_audio(audio_path, model=model_to_use)
+                        
+                        if transcription_response:
+                            break  # 转录成功，跳出循环
+                            
+                        if transcribe_attempt < max_transcribe_attempts - 1:
+                            logger.info(f"转录失败，将在10秒后使用不同模型重试")
+                            await asyncio.sleep(10)
+                    except Exception as e:
+                        logger.error(f"转录过程中发生异常: {e}")
+                        if transcribe_attempt < max_transcribe_attempts - 1:
+                            logger.info(f"将在10秒后重试转录")
+                            await asyncio.sleep(10)
                 
                 # 清理临时文件
                 cleanup_media_files([video_path, audio_path])

@@ -2,6 +2,7 @@ from pydantic import BaseModel, HttpUrl, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from .user import User # Assuming user.py is in the same schemas directory
+from .note import Note
 
 class TaskBase(BaseModel):
     blogger_profile_url: HttpUrl
@@ -24,6 +25,7 @@ class Task(TaskBase): # Schema for reading/returning task data
     created_at: datetime
     updated_at: datetime
     owner: Optional[User] = None # To include user details when returning a task
+    notes: List[Note] = []  # 添加 notes 字段
 
     model_config = {
         "from_attributes": True # For Pydantic V2

@@ -58,11 +58,28 @@ def update_note_after_collection(
     video_url: Optional[str] = None
 ) -> NoteModel:
     """收集笔记详情后更新笔记"""
+    
+    # 转换HttpUrl为字符串
+    # 处理raw_details中的HttpUrl对象
+    if raw_details and isinstance(raw_details, dict):
+        # 处理cover字段(可能是HttpUrl列表)
+        if "cover" in raw_details and isinstance(raw_details["cover"], list):
+            raw_details["cover"] = [str(url) for url in raw_details["cover"]]
+            
+        # 处理url字段
+        if "url" in raw_details and hasattr(raw_details["url"], "__str__"):
+            raw_details["url"] = str(raw_details["url"])
+            
+        # 其他可能包含HttpUrl的字段...
+        for field in ["video_link", "audio_link"]:
+            if field in raw_details and hasattr(raw_details[field], "__str__"):
+                raw_details[field] = str(raw_details[field])
+    
     db_note.raw_note_details = raw_details
     db_note.details_collected_at = datetime.now()
     
     if video_url:
-        db_note.video_url_internal = video_url
+        db_note.video_url_internal = str(video_url)  # 确保video_url也是字符串
         db_note.processing_status = "video_downloaded"
         db_note.video_downloaded_at = datetime.now()
     else:

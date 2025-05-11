@@ -5,7 +5,7 @@ from typing import List
 import traceback
 
 from schemas.task import Task, TaskCreate, TaskUpdate
-from schemas.note import NoteCreate
+from schemas.note import Note, NoteCreate
 from crud import crud_task, crud_note
 from api import deps
 from models.user import User as UserModel
@@ -17,7 +17,6 @@ router = APIRouter()
 async def process_task_notes(task_id: int, db: Session):
     """
     后台任务：获取博主的笔记列表并筛选符合条件的笔记
-    暂时禁用自动处理逻辑，仅更新任务状态
     """
     try:
         # 获取任务信息
@@ -26,14 +25,7 @@ async def process_task_notes(task_id: int, db: Session):
             print(f"Error: Task {task_id} not found")
             return
         
-        # 暂时标记任务为成功，不实际获取笔记
-        task.status = "success"
-        task.status_message = "任务创建成功 (笔记自动获取功能暂时禁用)"
-        db.add(task)
-        db.commit()
-        
-        # ===== 以下为原自动处理逻辑，暂时注释掉 =====
-        """
+        # ===== 取消注释，启用自动处理逻辑 =====
         # 获取博主ID
         blogger_id = task.blogger_id
         if not blogger_id:
@@ -118,14 +110,13 @@ async def process_task_notes(task_id: int, db: Session):
                 except ValueError:
                     likes_count = 0
             
-            # 创建笔记记录
+            # 创建笔记记录 - 确保保存标题
             note_create = NoteCreate(
                 task_id=task.id,
                 xhs_note_id=note.note_id,
                 xhs_note_url=note_url,
                 note_type=note.type,
-                # TODO: 添加保存标题
-                # note_title=note.title,
+                note_title=note.title,  # 添加保存标题
                 original_likes_count=likes_count,
                 processing_status="pending_collection"
             )
@@ -134,7 +125,7 @@ async def process_task_notes(task_id: int, db: Session):
         # 更新任务状态
         db.add(task)
         db.commit()
-        """
+        # ===== 注释结束 =====
         
     except Exception as e:
         print(f"Error processing task notes: {e}")
@@ -164,6 +155,14 @@ async def create_new_task(
     """
     user_id = current_user.id
     
+    # 确保任务有默认规则
+    if not task_in.scraping_rules:
+        task_in.scraping_rules = {
+            "type": "video",     # 默认只抓取视频类
+            "sort_by": "likes",  # 默认按点赞排序
+            "count": 10          # 默认抓取前10条
+        }
+    
     # 创建任务
     task = crud_task.create_task(db=db, task_in=task_in, user_id=user_id)
     
@@ -180,13 +179,20 @@ def read_task(
     current_user: UserModel = Depends(deps.get_current_active_user)
 ):
     """
-    按 ID 获取特定任务，该任务属于当前用户。
+    按 ID 获取特定任务，该任务属于当前用户，并包含其笔记列表。
     """
     task = crud_task.get_task(db, task_id=task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到")
     if task.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有足够的权限访问此任务。")
+    
+    # 获取任务的笔记列表
+    notes = crud_note.get_notes_by_task(db, task_id=task_id)
+    
+    # 将笔记列表添加到任务对象中
+    task.notes = notes
+    
     return task
 
 @router.get("/", response_model=List[Task])
@@ -243,3 +249,24 @@ def delete_existing_task(
     if not deleted_task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到或已被删除。")
     return deleted_task
+
+@router.get("/notes/{note_id}", response_model=Note)
+def read_note(
+    *,
+    db: Session = Depends(deps.get_db),
+    note_id: int,
+    current_user: UserModel = Depends(deps.get_current_active_user)
+):
+    """
+    按 ID 获取特定笔记，该笔记属于当前用户。
+    """
+    note = crud_note.get_note(db, note_id=note_id)
+    if not note:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="笔记未找到")
+    
+    # 验证用户是否有权访问该笔记
+    task = crud_task.get_task(db, task_id=note.task_id)
+    if not task or task.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有足够的权限访问此笔记。")
+    
+    return note

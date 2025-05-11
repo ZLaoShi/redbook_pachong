@@ -241,3 +241,38 @@ class XHSClient:
                 break
                 
         return all_items
+
+    async def search_notes_with_options(self, search_data: Dict) -> Dict:
+        """
+        使用更多选项进行搜索
+        Args:
+            search_data: 完整的搜索参数
+        Returns:
+            搜索结果
+        """
+        url = f"{self._host}/api/sns/web/v1/search/notes"
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url=url,
+                    headers=self.headers,
+                    json=search_data,
+                    timeout=30.0
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"搜索笔记失败: {response.status_code} - {response.text}")
+                    return {"items": []}
+                
+                result = response.json()
+                if not result.get("success", False):
+                    error_msg = result.get("msg", "Unknown error")
+                    logger.error(f"API返回错误: {error_msg}")
+                    return {"items": []}
+                    
+                return result.get("data", {"items": []})
+                
+        except Exception as e:
+            logger.error(f"搜索笔记失败: {e}")
+            return {"items": []}

@@ -6,9 +6,8 @@ class NoteBase(BaseModel):
     task_id: int
     xhs_note_id: str
     xhs_note_url: str
+    note_title: Optional[str] = None
     note_type: Optional[str] = None
-    # TODO: 添加note_title字段用于搜索
-    # note_title: Optional[str] = None
     original_likes_count: Optional[int] = None
     processing_status: str = "pending_collection"
     
