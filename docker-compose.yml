@@ -1,0 +1,42 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app  # 将本地 backend 目录挂载到容器的 /app 目录，方便开发时代码热更新
+    environment:
+      # 数据库连接信息将通过环境变量传递给 FastAPI 应用
+      # 您可以根据需要修改这些值
+      DATABASE_URL: "mysql+pymysql://redbook_user:redbook_password@db:3306/redbook_db"
+      SECRET_KEY: "dawokdhaiwuhdiuqahwodlodiahjwoidh22" # 用于JWT
+      AI_API_KEY: "sk-CHpIg7QqxBLWiVRBKfyTu5E4Q9iy7b31EKa945QfzzUTUPOJ" # 您的 AI Hu Max API Key
+      XHS_API_TOKEN: "sk-CHpIg7QqxBLWiVRBKfyTu5E4Q9iy7b31EKa945QfzzUTUPOJ"
+    depends_on:
+      - db
+    networks:
+      - redbook_network
+
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: redbook_db
+      MYSQL_USER: redbook_user
+      MYSQL_PASSWORD: redbook_password
+    ports:
+      - "3307:3306" # 将容器的3306端口映射到主机的3307端口，避免和linux默认数据库冲突
+    volumes:
+      - mysql_data:/var/lib/mysql # 持久化数据库数据
+    networks:
+      - redbook_network
+
+volumes:
+  mysql_data:
+
+networks:
+  redbook_network:
+    driver: bridge
