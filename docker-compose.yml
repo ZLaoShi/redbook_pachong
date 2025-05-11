@@ -1,4 +1,15 @@
 services:
+  frontend:
+    build: 
+      context: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - redbook_network
+
   backend:
     build:
       context: ./backend
