@@ -100,7 +100,7 @@ const handleCancel = () => {
             v-model:value="formData.scraping_rules.type"
             :options="[
               { label: '视频', value: 'video' },
-              { label: '图文', value: 'image' },
+              { label: '图文', value: 'normal' },
               { label: '全部', value: 'all' }
             ]"
             class="rule-select"

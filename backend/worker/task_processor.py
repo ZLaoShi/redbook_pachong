@@ -9,6 +9,7 @@ from pydantic import HttpUrl
 from db.database import SessionLocal
 from crud import crud_note, crud_task
 from models.note import Note as NoteModel
+from schemas.note import Note
 from services.aihubmax_service import get_xhs_note_detail, transcribe_audio, get_qwen_chat_completion, QwenMessage
 from utils.media_processor import process_video_to_audio, cleanup_media_files
 from core.config import settings
@@ -69,28 +70,41 @@ async def process_note_collection():
                     )
                     continue
                     
-                # 处理视频链接
-                video_url = None
-                if response.data.video_link:
-                    # 优先使用API返回的video_link
-                    video_url = response.data.video_link
+                # 处理笔记内容
+                if response.data:
+                    # 判断笔记类型 - 使用API返回的原始类型
+                    note_type = "video" if response.data.video_link else "normal"
                     
-                    # 下载视频和提取音频将在下一步处理
-                    video_path = None
-                    audio_path = None
+                    # 更新笔记类型
+                    note.note_type = note_type
                     
-                    # 更新笔记，标记为已采集
-                    crud_note.update_note_after_collection(
-                        db, note, 
-                        response.data.model_dump(),
-                        video_url
-                    )
-                else:
-                    # 没有视频，标记为已完成且无视频
-                    crud_note.update_note_after_collection(
-                        db, note,
-                        response.data.model_dump()
-                    )
+                    # 针对不同类型的笔记进行不同处理
+                    if note_type == "video":
+                        # 现有的视频处理逻辑
+                        video_url = response.data.video_link
+                        crud_note.update_note_after_collection(
+                            db, note, 
+                            response.data.model_dump(),
+                            video_url
+                        )
+                    else:
+                        # 图文笔记处理 - 修改为使用"normal"类型
+                        image_urls = []
+                        if hasattr(response.data, "images") and response.data.images:
+                            image_urls = [img.url for img in response.data.images]
+                        
+                        # 更新笔记，将图片URL列表添加到raw_note_details中
+                        note_data = response.data.model_dump()
+                        note_data["image_urls"] = image_urls
+                        
+                        crud_note.update_note_after_collection(
+                            db, note,
+                            note_data
+                        )
+                        
+                        # 图文笔记直接标记为待分析
+                        if not note.processing_status.startswith("error"):
+                            note.processing_status = "pending_analysis"
                 
                 # 更新任务统计
                 task.notes_processed_count += 1
@@ -172,7 +186,6 @@ async def process_note_transcription():
                     try:
                         # 使用不同的转录模型
                         models = ["whisper-1", "large", "medium"]  # 假设支持这些模型
-                        model_to_use = models[min(transcribe_attempt, len(models)-1)]
                         
                         logger.info(f"使用模型 {model_to_use} 尝试转录 (尝试 {transcribe_attempt+1}/{max_transcribe_attempts})")
                         transcription_response = await transcribe_audio(audio_path, model=model_to_use)
@@ -228,7 +241,7 @@ async def process_note_analysis():
     """处理AI分析"""
     db = SessionLocal()
     try:
-        # 获取已转录的笔记
+        # 获取待分析的笔记（包括图文和视频）
         notes = crud_note.get_pending_notes_for_analysis(db, limit=2)
         if not notes:
             return
@@ -237,36 +250,78 @@ async def process_note_analysis():
         
         for note in notes:
             try:
-                transcript = note.video_transcript_text
-                if not transcript:
-                    crud_note.update_note_with_error(
-                        db, note,
-                        "笔记没有转录文本",
-                        "error_analysis"
-                    )
-                    continue
+                # 根据笔记类型选择不同的分析方式
+                if note.note_type == "video":
+                    # 视频笔记需要转录文本
+                    text_to_analyze = note.video_transcript_text
+                    if not text_to_analyze:
+                        crud_note.update_note_with_error(
+                            db, note,
+                            "视频笔记没有转录文本",
+                            "error_analysis"
+                        )
+                        continue
+                else:
+                    # 处理normal类型的笔记(图文)
+                    if not note.raw_note_details:
+                        crud_note.update_note_with_error(
+                            db, note,
+                            "图文笔记没有原始数据",
+                            "error_analysis"
+                        )
+                        continue
+                    
+                    # 从原始数据中提取描述文本
+                    raw_details = note.raw_note_details
+                    text_to_analyze = raw_details.get("desc", "")
+                    
+                    # 如果有图片描述，也添加到分析文本中
+                    if "image_urls" in raw_details and raw_details["image_urls"]:
+                        text_to_analyze += "\n\n图片数量: " + str(len(raw_details["image_urls"]))
                 
-                # 准备提示词
-                system_prompt = """
-                你是一位专业的内容分析师，擅长分析短视频文案并提供改进建议。请对以下文案进行详细分析，包括：
-                1. 文案的核心卖点和情感诉求
-                2. 文案的叙事结构、节奏和钩子
-                3. 语言风格和目标受众群体
-                4. 号召性用语的效果
-                5. 至少3点具体的改进建议
+                # 根据不同的笔记类型准备不同的提示词
+                if note.note_type == "video":
+                    system_prompt = """
+                    你是一位专业的内容分析师，擅长分析短视频文案并提供改进建议。请对以下文案进行详细分析，包括：
+                    1. 文案的核心卖点和情感诉求
+                    2. 文案的叙事结构、节奏和钩子
+                    3. 语言风格和目标受众群体
+                    4. 号召性用语的效果
+                    5. 至少3点具体的改进建议
+                    
+                    返回一个结构化的分析报告，用标题分隔每个部分。
+                    """
+                    
+                    user_prompt = f"""
+                    以下是需要分析的视频文案：
+                    
+                    {text_to_analyze}
+                    
+                    请提供详细分析。
+                    """
+                else:
+                    # 图文笔记的分析提示词
+                    system_prompt = """
+                    你是一位专业的内容分析师，擅长分析小红书图文笔记并提供改进建议。请对以下笔记内容进行详细分析，包括：
+                    1. 内容的核心卖点和吸引力
+                    2. 文案的结构、风格和表达方式
+                    3. 目标受众群体画像
+                    4. 互动引导和号召性用语的效果
+                    5. 至少3点具体的改进建议
+                    
+                    返回一个结构化的分析报告，用标题分隔每个部分。
+                    """
+                    
+                    user_prompt = f"""
+                    以下是需要分析的小红书图文笔记内容：
+                    
+                    {text_to_analyze}
+                    
+                    该笔记包含图片内容，请基于文字描述进行分析。
+                    请提供详细分析。
+                    """
                 
-                返回一个结构化的分析报告，用标题分隔每个部分。
-                """
-                
-                user_prompt = f"""
-                以下是需要分析的视频文案：
-                
-                {transcript}
-                
-                请提供详细分析。
-                """
-                
-                # 调用千问API进行分析
+                # 调用AI API进行分析（与现有代码相同）
                 messages = [
                     QwenMessage(role="system", content=system_prompt),
                     QwenMessage(role="user", content=user_prompt)
@@ -307,6 +362,87 @@ async def process_note_analysis():
         logger.error(traceback.format_exc())
     finally:
         db.close()
+
+async def process_note(note_id, db):
+    """处理单个笔记的采集、转写和分析"""
+    db_note = db.query(Note).filter(Note.id == note_id).first()
+    if not db_note:
+        return
+    
+    # 1. 采集笔记内容
+    try:
+        db_note.processing_status = 'collecting'
+        db.commit()
+        
+        # 调用API采集笔记内容
+        # ...采集代码...
+        
+        # 更新状态
+        db_note.processing_status = 'collected'
+        db_note.details_collected_at = func.now()
+        db.commit()
+    except Exception as e:
+        db_note.processing_status = 'error_collection'
+        db_note.error_message = f"采集失败: {str(e)}"
+        db.commit()
+        return
+    
+    # 如果是视频，需要下载视频并转写
+    if db_note.note_type == 'video':
+        # 2. 下载视频
+        try:
+            db_note.processing_status = 'downloading_video'
+            db.commit()
+            
+            # 下载视频到本地或云存储
+            # video_path = download_video(db_note.video_url)
+            # db_note.video_url_internal = video_path
+            
+            db_note.video_downloaded_at = func.now()
+            db.commit()
+        except Exception as e:
+            db_note.processing_status = 'error_video_download'
+            db_note.error_message = f"视频下载失败: {str(e)}"
+            db.commit()
+            return
+        
+        # 3. 转写视频内容
+        try:
+            db_note.processing_status = 'transcribing'
+            db.commit()
+            
+            # 调用 Whisper API 转写视频
+            # transcript = transcribe_video(video_path)
+            # db_note.video_transcript_text = transcript
+            
+            db_note.transcribed_at = func.now()
+            db_note.processing_status = 'transcribed'
+            db.commit()
+        except Exception as e:
+            db_note.processing_status = 'error_transcript'
+            db_note.error_message = f"转写失败: {str(e)}"
+            db.commit()
+            return
+    
+    # 4. AI分析
+    try:
+        db_note.processing_status = 'analyzing'
+        db.commit()
+        
+        # 准备待分析的文本
+        text_to_analyze = db_note.video_transcript_text if db_note.note_type == 'video' else db_note.raw_note_details.get('desc', '')
+        
+        # 调用 AI 模型进行分析
+        # analysis_result = analyze_content(text_to_analyze)
+        # db_note.analysis_result_text = analysis_result
+        
+        db_note.analyzed_at = func.now()
+        db_note.processing_status = 'completed'
+        db.commit()
+    except Exception as e:
+        db_note.processing_status = 'error_analysis'
+        db_note.error_message = f"分析失败: {str(e)}"
+        db.commit()
 
 async def run_background_tasks():
     """运行所有后台任务"""

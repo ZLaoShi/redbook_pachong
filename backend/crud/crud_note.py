@@ -27,11 +27,17 @@ def get_pending_notes_for_transcription(db: Session, limit: int = 5) -> List[Not
         NoteModel.video_url_internal.isnot(None)
     ).order_by(NoteModel.created_at.asc()).limit(limit).all()
 
-def get_pending_notes_for_analysis(db: Session, limit: int = 5) -> List[NoteModel]:
-    """获取待分析的笔记"""
+def get_pending_notes_for_analysis(db: Session, limit: int = 10) -> List[NoteModel]:
+    """获取待分析的笔记（包括视频和图文）"""
     return db.query(NoteModel).filter(
-        NoteModel.processing_status == "transcribed",
-        NoteModel.video_transcript_text.isnot(None)
+        # 为视频笔记
+        ((NoteModel.note_type == "video") & 
+         (NoteModel.processing_status == "transcribed") &
+         (NoteModel.video_transcript_text.isnot(None))) |
+        # 或为图文笔记且已采集完成 - 修改为normal类型
+        ((NoteModel.note_type == "normal") & 
+         (NoteModel.processing_status == "pending_analysis") &
+         (NoteModel.raw_note_details.isnot(None)))
     ).order_by(NoteModel.created_at.asc()).limit(limit).all()
 
 def create_note(db: Session, note_in: NoteCreate) -> NoteModel:

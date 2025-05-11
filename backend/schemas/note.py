@@ -1,18 +1,16 @@
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, HttpUrl
 from typing import Optional, Dict, Any
 from datetime import datetime
 
 class NoteBase(BaseModel):
-    task_id: int
     xhs_note_id: str
-    xhs_note_url: str
+    xhs_note_url: HttpUrl
     note_title: Optional[str] = None
     note_type: Optional[str] = None
-    original_likes_count: Optional[int] = None
-    processing_status: str = "pending_collection"
-    
+    original_likes_count: Optional[int] = 0
+
 class NoteCreate(NoteBase):
-    pass
+    task_id: int
 
 class NoteUpdate(BaseModel):
     raw_note_details: Optional[Dict[str, Any]] = None
@@ -28,6 +26,8 @@ class NoteUpdate(BaseModel):
 
 class Note(NoteBase):
     id: int
+    task_id: int
+    processing_status: str
     raw_note_details: Optional[Dict[str, Any]] = None
     video_url_internal: Optional[str] = None
     video_transcript_text: Optional[str] = None
@@ -39,7 +39,7 @@ class Note(NoteBase):
     video_downloaded_at: Optional[datetime] = None
     transcribed_at: Optional[datetime] = None
     analyzed_at: Optional[datetime] = None
-    
+
     model_config = {
         "from_attributes": True
     }

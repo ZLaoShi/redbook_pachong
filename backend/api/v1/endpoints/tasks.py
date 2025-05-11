@@ -59,8 +59,15 @@ async def process_task_notes(task_id: int, db: Session):
             
             # 筛选指定类型
             if note_type != "all":
-                notes = [note for note in notes if note.type == note_type]
-                
+                if note_type == "video":
+                    # 视频类型筛选
+                    notes = [note for note in notes if getattr(note, "type", "") == "video"]
+                elif note_type == "normal":
+                    # 图文类型筛选 - 接受API返回的normal类型
+                    notes = [note for note in notes if getattr(note, "type", "") != "video"]
+                # TODO: 提供的主页信息API默认只返回30条笔记
+                # 目前筛选后笔记数量太少，可能是因为默认只获取了首页的30条数据
+
             # 按点赞量排序 (需要将字符串转为数字进行排序)
             if sort_by == "likes" and notes:
                 def get_likes_count(note):
@@ -111,12 +118,18 @@ async def process_task_notes(task_id: int, db: Session):
                     likes_count = 0
             
             # 创建笔记记录 - 确保保存标题
+            # 确定笔记类型 - 使用原始类型
+            detected_type = getattr(note, "type", "")
+            # 如果类型不是video，统一为normal
+            if detected_type != "video":
+                detected_type = "normal"
+            
             note_create = NoteCreate(
                 task_id=task.id,
                 xhs_note_id=note.note_id,
                 xhs_note_url=note_url,
-                note_type=note.type,
-                note_title=note.title,  # 添加保存标题
+                note_type=detected_type,
+                note_title=getattr(note, "title", "无标题"),
                 original_likes_count=likes_count,
                 processing_status="pending_collection"
             )
